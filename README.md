@@ -7,13 +7,13 @@ Native Swift package for creator install attribution and promo-code offers. Work
 In Xcode: **File → Add Package Dependencies** →
 
 ```
-https://github.com/KennyYe/tapapplink-ios
+https://github.com/tapapplink/tapapplink-ios
 ```
 
 Or in a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/KennyYe/tapapplink-ios", from: "0.1.0")
+.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.1.0")
 ```
 
 ## Usage
