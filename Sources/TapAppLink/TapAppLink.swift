@@ -109,6 +109,14 @@ public enum TapAppLink {
     lastOffer
   }
 
+  public static func getAttributionId() -> String? {
+    lastAttributionId
+  }
+
+  public static func getAppUserId() -> String? {
+    lastAppUserId
+  }
+
   @discardableResult
   public static func linkRevenueCatUser(_ appUserId: String) async throws -> [String: Any] {
     try await setAppUserId(appUserId)

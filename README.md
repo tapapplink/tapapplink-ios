@@ -1,10 +1,22 @@
 # Tap App Link iOS SDK
 
-Native iOS / macOS client for Tap App Link attribution.
+Native Swift package for creator install attribution and promo-code offers. Works without IDFA and without an App Tracking Transparency prompt.
 
 ## Install
 
-In Xcode: File → Add Package Dependencies → [https://github.com/KennyYe/tapapplink-ios](https://github.com/KennyYe/tapapplink-ios)
+In Xcode: **File → Add Package Dependencies** →
+
+```
+https://github.com/KennyYe/tapapplink-ios
+```
+
+Or in a `Package.swift`:
+
+```swift
+.package(url: "https://github.com/KennyYe/tapapplink-ios", from: "0.1.0")
+```
+
+## Usage
 
 ```swift
 import TapAppLink
@@ -16,7 +28,17 @@ TapAppLink.configure(.init(
 
 try await TapAppLink.trackInstall()
 try await TapAppLink.setAppUserId(Purchases.shared.appUserID)
+
+if let offer = TapAppLink.getOffer() {
+  // Present the discounted billing offer
+}
+
+try await TapAppLink.applyCode("SARAH10")
 ```
+
+`trackInstall()` is safe on every launch — it only records once per install. Call `resetForTesting()` in debug builds before repeating a match test on the same install.
+
+Purchases are attributed through billing webhooks. Leave out a client `trackPurchase` call.
 
 ## License
 
