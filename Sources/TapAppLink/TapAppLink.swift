@@ -12,18 +12,15 @@ public struct TapAppLinkConfig: Sendable {
   public var publicKey: String
   public var environment: TapAppLinkEnvironment
   public var ingestUrl: String?
-  public var debugSessionId: String?
 
   public init(
     publicKey: String,
     environment: TapAppLinkEnvironment,
-    ingestUrl: String? = nil,
-    debugSessionId: String? = nil
+    ingestUrl: String? = nil
   ) {
     self.publicKey = publicKey
     self.environment = environment
     self.ingestUrl = ingestUrl
-    self.debugSessionId = debugSessionId
   }
 }
 
@@ -63,9 +60,6 @@ public enum TapAppLink {
       "networkContext": regionCode(),
       "firstOpenAt": ISO8601DateFormatter().string(from: Date()),
     ]
-    if let debugSessionId = config?.debugSessionId {
-      body["debugSessionId"] = debugSessionId
-    }
     let result = try await post("/ingestInstall", body: body)
     tracked = true
     cacheFromResult(result)
@@ -78,9 +72,6 @@ public enum TapAppLink {
     var body: [String: Any] = ["appUserId": appUserId]
     if let lastAttributionId {
       body["attributionId"] = lastAttributionId
-    }
-    if let debugSessionId = config?.debugSessionId {
-      body["debugSessionId"] = debugSessionId
     }
     return try await post("/ingestIdentify", body: body)
   }
@@ -96,9 +87,6 @@ public enum TapAppLink {
     }
     if let lastAttributionId {
       body["attributionId"] = lastAttributionId
-    }
-    if let debugSessionId = config?.debugSessionId {
-      body["debugSessionId"] = debugSessionId
     }
     let result = try await post("/redeemCode", body: body)
     cacheFromResult(result)
