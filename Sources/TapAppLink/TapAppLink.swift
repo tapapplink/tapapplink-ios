@@ -27,7 +27,6 @@ public struct TapAppLinkConfig: Sendable {
 public struct TapAppLinkOffer: Sendable {
   public var creatorName: String
   public var promoCode: String?
-  public var discountBps: Int
   public var billingOfferId: String?
 }
 
@@ -140,7 +139,6 @@ public enum TapAppLink {
     lastOffer = TapAppLinkOffer(
       creatorName: offer["creatorName"] as? String ?? "",
       promoCode: offer["promoCode"] as? String,
-      discountBps: offer["discountBps"] as? Int ?? 0,
       billingOfferId: offer["billingOfferId"] as? String
     )
   }

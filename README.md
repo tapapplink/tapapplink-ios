@@ -13,7 +13,7 @@ https://github.com/tapapplink/tapapplink-ios
 Or in a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.1.1")
+.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.2.0")
 ```
 
 ## Usage
