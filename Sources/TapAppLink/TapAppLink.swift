@@ -46,7 +46,7 @@ public struct TapAppLinkOffer: Sendable, Codable, Equatable {
 
 public enum TapAppLink {
   /// Semver shipped in the `X-TapAppLink-SDK-Version` request header.
-  public static let sdkVersion = "0.3.1"
+  public static let sdkVersion = "0.3.2"
 
   private static var config: TapAppLinkConfig?
   private static var tracked = false
@@ -54,6 +54,7 @@ public enum TapAppLink {
   private static var lastAttributionId: String?
   private static var lastAppUserId: String?
   private static var lastOffer: TapAppLinkOffer?
+  private static var pendingRedeem: RedeemAttemptStore.Pending?
   private static var session = URLSession.shared
   private static let defaults = UserDefaults(suiteName: Storage.suiteName) ?? .standard
 
@@ -112,9 +113,12 @@ public enum TapAppLink {
   @discardableResult
   public static func applyCode(_ code: String) async throws -> [String: Any] {
     loadPersistedState()
+    let normalized = RedeemAttemptStore.normalizeCode(code)
+    let requestId = ensureRedeemRequestId(forNormalizedCode: normalized)
     var body: [String: Any] = [
       "code": code,
       "platform": "IOS",
+      "requestId": requestId,
     ]
     if let lastAppUserId {
       body["appUserId"] = lastAppUserId
@@ -123,10 +127,21 @@ public enum TapAppLink {
       body["attributionId"] = lastAttributionId
     }
 
-    let result = try await post("/redeemCode", body: body)
-    cacheFromResult(result)
-    logStoredState()
-    return result
+    do {
+      let result = try await post("/redeemCode", body: body)
+      clearPendingRedeem()
+      cacheFromResult(result)
+      logStoredState()
+      return result
+    } catch let error as TapAppLinkRedeemError {
+      switch error {
+      case .unknownCode, .inactiveCode, .wrongEnvironment:
+        clearPendingRedeem()
+      case .network, .other:
+        break
+      }
+      throw error
+    }
   }
 
   public static func getOffer() -> TapAppLinkOffer? {
@@ -175,9 +190,21 @@ public enum TapAppLink {
     lastAttributionId = nil
     lastAppUserId = nil
     lastOffer = nil
+    pendingRedeem = nil
     session = .shared
     Storage.clear(defaults)
     log("resetForTesting cleared memory and UserDefaults suite \(Storage.suiteName)")
+  }
+
+  /// Pending redeem request id for the current attempt, if any. For unit tests only.
+  public static func pendingRedeemRequestIdForTesting() -> String? {
+    loadPersistedState()
+    return pendingRedeem?.requestId
+  }
+
+  /// Normalised promo code used for requestId reuse. For unit tests only.
+  public static func normalizeCodeForTesting(_ code: String) -> String {
+    RedeemAttemptStore.normalizeCode(code)
   }
 
   /// Replaces the shared `URLSession` used for ingest calls. For unit tests only.
@@ -214,6 +241,7 @@ public enum TapAppLink {
     lastAttributionId = nil
     lastAppUserId = nil
     lastOffer = nil
+    pendingRedeem = nil
   }
 
   private static func skippedInstallResult() -> [String: Any] {
@@ -268,6 +296,30 @@ public enum TapAppLink {
     if lastOffer == nil, let data = defaults.data(forKey: Storage.offer) {
       lastOffer = try? JSONDecoder().decode(TapAppLinkOffer.self, from: data)
     }
+    if pendingRedeem == nil {
+      pendingRedeem = RedeemAttemptStore.load(from: defaults)
+    }
+  }
+
+  private static func ensureRedeemRequestId(forNormalizedCode normalized: String) -> String {
+    if let pendingRedeem, pendingRedeem.normalizedCode == normalized {
+      return pendingRedeem.requestId
+    }
+    let requestId = UUID().uuidString
+    let pending = RedeemAttemptStore.Pending(
+      normalizedCode: normalized,
+      requestId: requestId
+    )
+    pendingRedeem = pending
+    RedeemAttemptStore.save(pending, to: defaults)
+    log("redeem requestId=\(requestId) normalizedCode=\(normalized)")
+    return requestId
+  }
+
+  private static func clearPendingRedeem() {
+    pendingRedeem = nil
+    RedeemAttemptStore.clear(defaults)
+    log("cleared pending redeem requestId")
   }
 
   private static func persistTracked(_ value: Bool) {
@@ -379,10 +431,18 @@ public enum TapAppLink {
     } else {
       offerSummary = "nil"
     }
+    let pendingSummary: String
+    if let pendingRedeem {
+      pendingSummary =
+        "code=\(pendingRedeem.normalizedCode) requestId=\(pendingRedeem.requestId)"
+    } else {
+      pendingSummary = "nil"
+    }
     log(
       "storedState installId=\(installId ?? "nil") tracked=\(tracked) " +
         "attributionId=\(lastAttributionId ?? "nil") " +
-        "appUserId=\(lastAppUserId ?? "nil") offer=(\(offerSummary))"
+        "appUserId=\(lastAppUserId ?? "nil") offer=(\(offerSummary)) " +
+        "pendingRedeem=(\(pendingSummary))"
     )
   }
 
@@ -418,6 +478,7 @@ public enum TapAppLink {
       defaults.removeObject(forKey: tracked)
       defaults.removeObject(forKey: attributionId)
       defaults.removeObject(forKey: offer)
+      RedeemAttemptStore.clear(defaults)
     }
   }
 }
