@@ -33,12 +33,12 @@ final class TapAppLinkTests: XCTestCase {
     XCTAssertNil(TapAppLink.getAppUserId())
   }
 
-  func testInvalidIngestUrlThrows() async {
+  func testEmptyIngestUrlThrowsInvalidURL() async {
     TapAppLink.configure(
       .init(
         publicKey: "etk_test_key",
         environment: .sandbox,
-        ingestUrl: "not a url"
+        ingestUrl: ""
       )
     )
 
@@ -46,7 +46,7 @@ final class TapAppLinkTests: XCTestCase {
       _ = try await TapAppLink.trackInstall()
       XCTFail("Expected TapAppLinkError.invalidURL")
     } catch TapAppLinkError.invalidURL {
-      // Expected
+      // Expected: URL(string:) rejects an empty base.
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
