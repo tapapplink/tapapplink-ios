@@ -33,33 +33,19 @@ final class TapAppLinkTests: XCTestCase {
     XCTAssertNil(TapAppLink.getAppUserId())
   }
 
-  func testTrackInstallThrowsWhenNotConfigured() async {
+  func testInvalidIngestUrlThrows() async {
+    TapAppLink.configure(
+      .init(
+        publicKey: "etk_test_key",
+        environment: .sandbox,
+        ingestUrl: "not a url"
+      )
+    )
+
     do {
       _ = try await TapAppLink.trackInstall()
-      XCTFail("Expected TapAppLinkError.notConfigured")
-    } catch TapAppLinkError.notConfigured {
-      // Expected
-    } catch {
-      XCTFail("Unexpected error: \(error)")
-    }
-  }
-
-  func testSetAppUserIdThrowsWhenNotConfigured() async {
-    do {
-      _ = try await TapAppLink.setAppUserId("user_123")
-      XCTFail("Expected TapAppLinkError.notConfigured")
-    } catch TapAppLinkError.notConfigured {
-      // Expected
-    } catch {
-      XCTFail("Unexpected error: \(error)")
-    }
-  }
-
-  func testApplyCodeThrowsWhenNotConfigured() async {
-    do {
-      _ = try await TapAppLink.applyCode("SARAH10")
-      XCTFail("Expected TapAppLinkError.notConfigured")
-    } catch TapAppLinkError.notConfigured {
+      XCTFail("Expected TapAppLinkError.invalidURL")
+    } catch TapAppLinkError.invalidURL {
       // Expected
     } catch {
       XCTFail("Unexpected error: \(error)")

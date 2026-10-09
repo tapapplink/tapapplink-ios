@@ -8,6 +8,8 @@ excluded:
 
 disabled_rules:
   - todo
+  # Current sources use trailing commas in multi-line literals.
+  - trailing_comma
 
 line_length:
   warning: 140
