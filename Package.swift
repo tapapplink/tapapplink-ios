@@ -11,7 +11,12 @@ let package = Package(
     .library(name: "TapAppLink", targets: ["TapAppLink"]),
   ],
   targets: [
-    .target(name: "TapAppLink"),
+    .target(
+      name: "TapAppLink",
+      resources: [
+        .process("PrivacyInfo.xcprivacy"),
+      ]
+    ),
     .testTarget(
       name: "TapAppLinkTests",
       dependencies: ["TapAppLink"]
