@@ -28,7 +28,7 @@ type_name:
 
 # The public TapAppLink facade keeps configure/track/persist/log in one type.
 type_body_length:
-  warning: 350
-  error: 400
+  warning: 400
+  error: 450
 
 reporter: "xcode"

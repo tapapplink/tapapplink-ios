@@ -15,10 +15,10 @@ https://github.com/tapapplink/tapapplink-ios
 Or in a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.0")
+.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.1")
 ```
 
-Pin to a released semver tag such as `0.3.0`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
+Pin to a released semver tag such as `0.3.1`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
 
 ## Usage
 
@@ -37,8 +37,49 @@ if let offer = TapAppLink.getOffer() {
   // Present the discounted billing offer
 }
 
-try await TapAppLink.applyCode("SARAH10")
+do {
+  let result = try await TapAppLink.applyCode("SARAH10")
+  let alreadyAttributed = result["alreadyAttributed"] as? Bool ?? false
+  let offer = result["offer"] as? [String: Any]
+  let offerLine: String? = {
+    guard let name = offer?["creatorName"] as? String, !name.isEmpty else { return nil }
+    if let promo = offer?["promoCode"] as? String, !promo.isEmpty {
+      return "\(name) · \(promo)"
+    }
+    return name
+  }()
+
+  if alreadyAttributed {
+    // Title: "You're all set"
+    // Hide the code the customer typed.
+    // Show offerLine if present.
+  } else {
+    // Title: "Code applied"
+    // Show the code, plus offerLine if present.
+  }
+} catch TapAppLinkRedeemError.unknownCode {
+  // Title: "We don't recognise that code. Check it and try again."
+  // Hint: "Codes aren't case sensitive."
+} catch TapAppLinkRedeemError.inactiveCode {
+  // Title: "This code is no longer active."
+  // Hint: "You can still subscribe at the regular price."
+} catch TapAppLinkRedeemError.wrongEnvironment {
+  // Same customer-facing copy as unknownCode.
+  // Title: "We don't recognise that code. Check it and try again."
+  // Hint: "Codes aren't case sensitive."
+  // Developer-only (never show to customers):
+  // TapAppLinkRedeemError.wrongEnvironmentDeveloperWarning
+  // → "This code belongs to the other environment (Sandbox or Production). Check your API key."
+} catch TapAppLinkRedeemError.network {
+  // Title: "We couldn't check your code. Check your connection and try again."
+} catch let TapAppLinkRedeemError.other(status, message) {
+  // Same customer-facing copy as network.
+  // Log status and message for developers only.
+  print("applyCode failed status=\(status) message=\(message)")
+}
 ```
+
+Show success UI only on a real success result from `applyCode`. Do not treat an error as applied.
 
 `trackInstall()` is safe on every launch: the SDK persists an install id, the tracked flag, the attribution id and the offer in `UserDefaults`, and only posts `/ingestInstall` once per install. Later launches return the stored attribution and offer without a network call. Call `resetForTesting()` in debug builds before repeating a match test on the same install.
 

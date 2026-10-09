@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- **Fixed:** Android and React Native 0.3.0 could return an error from `applyCode()` as if it were a normal result, so an app could show a code as applied when it wasn't. Upgrade to 0.3.1, which raises a typed error for unknown, inactive and wrong-environment codes. iOS and Flutter 0.3.0 threw a generic error, and 0.3.1 makes it typed.
+- Map redeem failures to `TapAppLinkRedeemError` (`unknownCode`, `inactiveCode`, `wrongEnvironment`, `network`, `other(status:message:)`), including legacy 404 bodies and the newer 410/400 statuses.
+- Send `X-TapAppLink-SDK-Version: 0.3.1` on every ingest request so the server can return distinct redeem statuses.
+
 ## 0.3.0
 
 - Persist install id, tracked flag, attribution id and offer in `UserDefaults`, so `trackInstall()` posts `/ingestInstall` only once per install and later launches return the stored attribution and offer without a network call.
