@@ -58,7 +58,7 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
       return
     }
 
-    let url = request.url ?? URL(string: "https://example.invalid").flatMap { $0 } ?? URL(fileURLWithPath: "/")
+    let url = request.url ?? URL(string: "https://example.invalid") ?? URL(fileURLWithPath: "/")
     guard let response = HTTPURLResponse(
       url: url,
       statusCode: stub.statusCode,
