@@ -1,0 +1,29 @@
+# Minimal SwiftLint config tuned to the current TapAppLink sources.
+included:
+  - Sources
+  - Tests
+excluded:
+  - .build
+  - .swiftpm
+
+disabled_rules:
+  - todo
+  # Current sources use trailing commas in multi-line literals.
+  - trailing_comma
+
+line_length:
+  warning: 140
+  error: 200
+
+identifier_name:
+  min_length:
+    warning: 1
+  excluded:
+    - id
+    - x
+    - y
+
+type_name:
+  min_length: 3
+
+reporter: "xcode"
