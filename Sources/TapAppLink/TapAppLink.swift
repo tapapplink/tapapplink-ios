@@ -45,13 +45,16 @@ public struct TapAppLinkOffer: Sendable, Codable, Equatable {
 }
 
 public enum TapAppLink {
+  /// Semver shipped in the `X-TapAppLink-SDK-Version` request header.
+  public static let sdkVersion = "0.3.1"
+
   private static var config: TapAppLinkConfig?
   private static var tracked = false
   private static var installId: String?
   private static var lastAttributionId: String?
   private static var lastAppUserId: String?
   private static var lastOffer: TapAppLinkOffer?
-  private static let session = URLSession.shared
+  private static var session = URLSession.shared
   private static let defaults = UserDefaults(suiteName: Storage.suiteName) ?? .standard
 
   public static func configure(_ next: TapAppLinkConfig) {
@@ -119,6 +122,7 @@ public enum TapAppLink {
     if let lastAttributionId {
       body["attributionId"] = lastAttributionId
     }
+
     let result = try await post("/redeemCode", body: body)
     cacheFromResult(result)
     logStoredState()
@@ -171,8 +175,14 @@ public enum TapAppLink {
     lastAttributionId = nil
     lastAppUserId = nil
     lastOffer = nil
+    session = .shared
     Storage.clear(defaults)
     log("resetForTesting cleared memory and UserDefaults suite \(Storage.suiteName)")
+  }
+
+  /// Replaces the shared `URLSession` used for ingest calls. For unit tests only.
+  public static func setURLSessionForTesting(_ urlSession: URLSession) {
+    session = urlSession
   }
 
   /// Seeds persisted install state for tests. Also updates in-memory mirrors.
@@ -319,19 +329,43 @@ public enum TapAppLink {
     request.httpMethod = "POST"
     request.setValue("Bearer \(config.publicKey)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue(sdkVersion, forHTTPHeaderField: "X-TapAppLink-SDK-Version")
     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
     log("request \(path) url=\(url.absoluteString) body=\(debugJSON(body))")
     log("request Authorization=Bearer \(redact(config.publicKey))")
+    log("request X-TapAppLink-SDK-Version=\(sdkVersion)")
 
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
-      let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-      log("response \(path) status=\(status) failed")
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch {
+      log("response \(path) transport error: \(error.localizedDescription)")
+      if path == "/redeemCode" {
+        throw TapAppLinkRedeemError.network
+      }
+      throw error
+    }
+
+    guard let http = response as? HTTPURLResponse else {
+      log("response \(path) missing HTTPURLResponse")
+      if path == "/redeemCode" {
+        throw TapAppLinkRedeemError.network
+      }
       throw TapAppLinkError.requestFailed
     }
 
-    let parsed = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    let parsed = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+
+    guard (200 ..< 300).contains(http.statusCode) else {
+      log("response \(path) status=\(http.statusCode) body=\(debugJSON(parsed)) failed")
+      if path == "/redeemCode" {
+        throw TapAppLinkRedeemError.from(status: http.statusCode, body: parsed)
+      }
+      throw TapAppLinkError.requestFailed
+    }
+
     log("response \(path) status=\(http.statusCode) body=\(debugJSON(parsed))")
     return parsed
   }
@@ -386,10 +420,4 @@ public enum TapAppLink {
       defaults.removeObject(forKey: offer)
     }
   }
-}
-
-public enum TapAppLinkError: Error {
-  case notConfigured
-  case invalidURL
-  case requestFailed
 }
