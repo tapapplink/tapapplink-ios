@@ -15,10 +15,10 @@ https://github.com/tapapplink/tapapplink-ios
 Or in a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.2.0")
+.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.0")
 ```
 
-Pin to a released semver tag such as `0.2.0`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
+Pin to a released semver tag such as `0.3.0`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
 
 ## Usage
 
@@ -40,9 +40,15 @@ if let offer = TapAppLink.getOffer() {
 try await TapAppLink.applyCode("SARAH10")
 ```
 
-`trackInstall()` is safe on every launch — it only records once per install. Call `resetForTesting()` in debug builds before repeating a match test on the same install.
+`trackInstall()` is safe on every launch: the SDK persists an install id, the tracked flag, the attribution id and the offer in `UserDefaults`, and only posts `/ingestInstall` once per install. Later launches return the stored attribution and offer without a network call. Call `resetForTesting()` in debug builds before repeating a match test on the same install.
+
+Opt into request logging with `debugLogging: true` on `TapAppLinkConfig`. Logs include each request, response and stored state, and redact the API key.
 
 Purchases are attributed through billing webhooks. Leave out a client `trackPurchase` call.
+
+## Privacy
+
+The package ships a `PrivacyInfo.xcprivacy` manifest: no tracking, UserDefaults access under reason CA92.1, and declarations for the data types sent to the ingest API (device id / install id, user id, product interaction, coarse location / region, and other diagnostic fields such as platform and locale).
 
 ## Development
 
