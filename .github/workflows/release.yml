@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Glob filters only; verify-tag enforces real semver (X.Y.Z or vX.Y.Z).
+      - '*.*.*'
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-tag:
+    name: Verify semver tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      tag: ${{ steps.semver.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate tag and changelog
+        id: semver
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '${TAG}' is not a valid semver (expected X.Y.Z or vX.Y.Z)"
+            exit 1
+          fi
+
+          if ! grep -qE "^## ${VERSION}$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## ${VERSION}' section for tag '${TAG}'"
+            exit 1
+          fi
+
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Verified tag ${TAG} (version ${VERSION})"
+
+  lint:
+    name: Lint
+    needs: verify-tag
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint lint --strict --config .swiftlint.yml
+
+  macos:
+    name: macOS build and test
+    needs: verify-tag
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Swift build
+        run: swift build
+
+      - name: Swift test
+        run: swift test --enable-code-coverage
+
+  ios:
+    name: iOS Simulator build
+    needs: verify-tag
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Resolve package
+        run: swift package resolve
+
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild \
+            -scheme TapAppLink \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData \
+            build
+
+  github-release:
+    name: Create GitHub Release
+    needs: [verify-tag, lint, macos, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Extract changelog notes
+        id: notes
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.verify-tag.outputs.version }}"
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+
+          awk -v ver="${VERSION}" '
+            $0 == "## " ver {capture=1; next}
+            /^## / && capture {exit}
+            capture {print}
+          ' CHANGELOG.md > "${NOTES_FILE}"
+
+          if [[ ! -s "${NOTES_FILE}" ]]; then
+            echo "Release ${VERSION} of Tap App Link iOS SDK." > "${NOTES_FILE}"
+          fi
+
+          {
+            echo "This Swift package is distributed via Swift Package Manager using git tags."
+            echo "Consume it with:"
+            echo ""
+            echo '```swift'
+            echo ".package(url: \"https://github.com/tapapplink/tapapplink-ios\", from: \"${VERSION}\")"
+            echo '```'
+            echo ""
+            echo "## Changes"
+            echo ""
+            cat "${NOTES_FILE}"
+          } > "${RUNNER_TEMP}/body.md"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.verify-tag.outputs.tag }}
+          name: ${{ needs.verify-tag.outputs.version }}
+          body_path: ${{ runner.temp }}/body.md
+          draft: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

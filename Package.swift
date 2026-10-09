@@ -12,5 +12,9 @@ let package = Package(
   ],
   targets: [
     .target(name: "TapAppLink"),
+    .testTarget(
+      name: "TapAppLinkTests",
+      dependencies: ["TapAppLink"]
+    ),
   ]
 )
