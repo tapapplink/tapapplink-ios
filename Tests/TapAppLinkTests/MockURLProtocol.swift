@@ -1,7 +1,8 @@
 import Foundation
 
 /// In-memory `URLProtocol` stub for SDK HTTP tests.
-final class MockURLProtocol: URLProtocol, @unchecked Sendable {
+/// Not `final`: `URLProtocol` requires `class` overrides for `canInit` / `canonicalRequest`.
+class MockURLProtocol: URLProtocol, @unchecked Sendable {
   struct Stub {
     var statusCode: Int
     var jsonObject: [String: Any]
