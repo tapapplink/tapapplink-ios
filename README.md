@@ -15,10 +15,10 @@ https://github.com/tapapplink/tapapplink-ios
 Or in a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.1")
+.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.2")
 ```
 
-Pin to a released semver tag such as `0.3.1`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
+Pin to a released semver tag such as `0.3.2`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
 
 ## Usage
 

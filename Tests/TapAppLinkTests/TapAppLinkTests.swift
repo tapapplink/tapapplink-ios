@@ -79,7 +79,7 @@ final class TapAppLinkTests: XCTestCase {
   }
 
   func testSdkVersionConstant() {
-    XCTAssertEqual(TapAppLink.sdkVersion, "0.3.1")
+    XCTAssertEqual(TapAppLink.sdkVersion, "0.3.2")
   }
 
   func testWrongEnvironmentDeveloperWarningCopy() {
@@ -210,8 +210,11 @@ final class TapAppLinkTests: XCTestCase {
     XCTAssertEqual(TapAppLink.getOffer()?.promoCode, "SARAH10")
     XCTAssertEqual(
       captured?.value(forHTTPHeaderField: "X-TapAppLink-SDK-Version"),
-      "0.3.1"
+      "0.3.2"
     )
+    let body = TestHTTPHelpers.requestJSON(captured)
+    XCTAssertNotNil(body?["requestId"] as? String)
+    XCTAssertNil(TapAppLink.pendingRedeemRequestIdForTesting())
   }
 
   func testApplyCodeLegacy404UnknownCodeBody() async {
@@ -375,8 +378,9 @@ final class TapAppLinkTests: XCTestCase {
       XCTAssertEqual(error, expected)
       XCTAssertEqual(
         captured?.value(forHTTPHeaderField: "X-TapAppLink-SDK-Version"),
-        "0.3.1"
+        "0.3.2"
       )
+      XCTAssertNotNil(TestHTTPHelpers.requestJSON(captured)?["requestId"] as? String)
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
