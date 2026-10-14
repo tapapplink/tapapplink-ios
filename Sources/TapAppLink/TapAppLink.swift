@@ -3,102 +3,6 @@ import Foundation
 import UIKit
 #endif
 
-public enum TapAppLinkEnvironment: String, Sendable {
-  case production
-  case sandbox
-}
-
-public struct TapAppLinkConfig: Sendable {
-  public var publicKey: String
-  public var environment: TapAppLinkEnvironment
-  public var ingestUrl: String?
-  /// When true, logs each request, response and stored state. API keys are redacted.
-  public var debugLogging: Bool
-
-  public init(
-    publicKey: String,
-    environment: TapAppLinkEnvironment,
-    ingestUrl: String? = nil,
-    debugLogging: Bool = false
-  ) {
-    self.publicKey = publicKey
-    self.environment = environment
-    self.ingestUrl = ingestUrl
-    self.debugLogging = debugLogging
-  }
-}
-
-public struct TapAppLinkOffer: Sendable, Codable, Equatable {
-  public var creatorName: String
-  public var promoCode: String?
-  public var billingOfferId: String?
-
-  public init(
-    creatorName: String,
-    promoCode: String? = nil,
-    billingOfferId: String? = nil
-  ) {
-    self.creatorName = creatorName
-    self.promoCode = promoCode
-    self.billingOfferId = billingOfferId
-  }
-}
-
-/// Success body from `/redeemCode`. New fields from the server are optional so
-/// older clients keep compiling.
-public struct TapAppLinkRedeemResult: Sendable, Equatable {
-  public var attributionId: String?
-  public var alreadyAttributed: Bool?
-  /// True when the submitted code matches the attributed creator offer.
-  public var codeMatches: Bool?
-  public var offer: Offer?
-
-  public struct Offer: Sendable, Equatable {
-    public var creatorName: String?
-    public var promoCode: String?
-    public var billingOfferId: String?
-
-    public init(
-      creatorName: String? = nil,
-      promoCode: String? = nil,
-      billingOfferId: String? = nil
-    ) {
-      self.creatorName = creatorName
-      self.promoCode = promoCode
-      self.billingOfferId = billingOfferId
-    }
-  }
-
-  public init(
-    attributionId: String? = nil,
-    alreadyAttributed: Bool? = nil,
-    codeMatches: Bool? = nil,
-    offer: Offer? = nil
-  ) {
-    self.attributionId = attributionId
-    self.alreadyAttributed = alreadyAttributed
-    self.codeMatches = codeMatches
-    self.offer = offer
-  }
-
-  static func from(dictionary: [String: Any]) -> TapAppLinkRedeemResult {
-    var offer: Offer?
-    if let raw = dictionary["offer"] as? [String: Any] {
-      offer = Offer(
-        creatorName: raw["creatorName"] as? String,
-        promoCode: raw["promoCode"] as? String,
-        billingOfferId: raw["billingOfferId"] as? String
-      )
-    }
-    return TapAppLinkRedeemResult(
-      attributionId: dictionary["attributionId"] as? String,
-      alreadyAttributed: dictionary["alreadyAttributed"] as? Bool,
-      codeMatches: dictionary["codeMatches"] as? Bool,
-      offer: offer
-    )
-  }
-}
-
 public enum TapAppLink {
   /// Semver shipped in the `X-TapAppLink-SDK-Version` request header.
   public static let sdkVersion = "0.3.3"
@@ -115,8 +19,7 @@ public enum TapAppLink {
   private static var session = URLSession.shared
   private static let defaults = UserDefaults(suiteName: Storage.suiteName) ?? .standard
   /// Coalesce concurrent identical `setAppUserId` calls into one POST.
-  private static var identifyInFlight: [String: Task<[String: Any], Error>] = [:]
-  private static let identifyLock = NSLock()
+  private static let identifyInFlight = IdentifyInFlightStore()
 
   public static func configure(_ next: TapAppLinkConfig) {
     config = next
@@ -171,31 +74,20 @@ public enum TapAppLink {
       return result
     }
 
-    identifyLock.lock()
-    if let existing = identifyInFlight[appUserId] {
-      identifyLock.unlock()
-      log("setAppUserId coalesced with in-flight identify for \(appUserId)")
-      return try await existing.value
-    }
-
-    let task = Task<[String: Any], Error> {
-      defer {
-        identifyLock.lock()
-        identifyInFlight.removeValue(forKey: appUserId)
-        identifyLock.unlock()
+    let task = identifyInFlight.coalesce(appUserId) {
+      Task<[String: Any], Error> {
+        defer { identifyInFlight.remove(appUserId) }
+        var body: [String: Any] = ["appUserId": appUserId]
+        if let lastAttributionId {
+          body["attributionId"] = lastAttributionId
+        }
+        let result = try await post("/ingestIdentify", body: body)
+        identifiedAppUserId = appUserId
+        persistIdentifiedAppUserId(appUserId)
+        logStoredState()
+        return result
       }
-      var body: [String: Any] = ["appUserId": appUserId]
-      if let lastAttributionId {
-        body["attributionId"] = lastAttributionId
-      }
-      let result = try await post("/ingestIdentify", body: body)
-      identifiedAppUserId = appUserId
-      persistIdentifiedAppUserId(appUserId)
-      logStoredState()
-      return result
     }
-    identifyInFlight[appUserId] = task
-    identifyLock.unlock()
     return try await task.value
   }
 
@@ -282,9 +174,7 @@ public enum TapAppLink {
     lastOffer = nil
     pendingRedeem = nil
     session = .shared
-    identifyLock.lock()
     identifyInFlight.removeAll()
-    identifyLock.unlock()
     Storage.clear(defaults)
     log("resetForTesting cleared memory and UserDefaults suite \(Storage.suiteName)")
   }
@@ -346,9 +236,7 @@ public enum TapAppLink {
     identifiedAppUserId = nil
     lastOffer = nil
     pendingRedeem = nil
-    identifyLock.lock()
     identifyInFlight.removeAll()
-    identifyLock.unlock()
   }
 
   private static func skippedIdentifyResult(appUserId: String) -> [String: Any] {
