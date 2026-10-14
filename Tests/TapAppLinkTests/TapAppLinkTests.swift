@@ -79,7 +79,7 @@ final class TapAppLinkTests: XCTestCase {
   }
 
   func testSdkVersionConstant() {
-    XCTAssertEqual(TapAppLink.sdkVersion, "0.3.2")
+    XCTAssertEqual(TapAppLink.sdkVersion, "0.3.3")
   }
 
   func testWrongEnvironmentDeveloperWarningCopy() {
@@ -193,6 +193,7 @@ final class TapAppLinkTests: XCTestCase {
       jsonObject: [
         "attributionId": "attr-new",
         "alreadyAttributed": false,
+        "codeMatches": true,
         "offer": [
           "creatorName": "Sarah",
           "promoCode": "SARAH10",
@@ -205,16 +206,45 @@ final class TapAppLinkTests: XCTestCase {
     configureForMock()
     let result = try await TapAppLink.applyCode("SARAH10")
 
-    XCTAssertEqual(result["attributionId"] as? String, "attr-new")
+    XCTAssertEqual(result.attributionId, "attr-new")
+    XCTAssertEqual(result.alreadyAttributed, false)
+    XCTAssertEqual(result.codeMatches, true)
+    XCTAssertEqual(result.offer?.creatorName, "Sarah")
     XCTAssertEqual(TapAppLink.getAttributionId(), "attr-new")
     XCTAssertEqual(TapAppLink.getOffer()?.promoCode, "SARAH10")
+    XCTAssertEqual(TapAppLink.getOffer()?.creatorName, "Sarah")
     XCTAssertEqual(
       captured?.value(forHTTPHeaderField: "X-TapAppLink-SDK-Version"),
-      "0.3.2"
+      "0.3.3"
     )
     let body = TestHTTPHelpers.requestJSON(captured)
     XCTAssertNotNil(body?["requestId"] as? String)
     XCTAssertNil(TapAppLink.pendingRedeemRequestIdForTesting())
+  }
+
+  func testApplyCodeAlreadyAttributedReturnsSuccessWithOptionalFields() async throws {
+    installMockSession()
+    MockURLProtocol.stub = .init(
+      statusCode: 200,
+      jsonObject: [
+        "attributionId": "attr-existing",
+        "alreadyAttributed": true,
+        "codeMatches": false,
+        "offer": [
+          "creatorName": "Bea",
+          "promoCode": "BEA10",
+        ],
+      ]
+    )
+    configureForMock()
+
+    let result = try await TapAppLink.applyCode("BEA10")
+
+    XCTAssertEqual(result.attributionId, "attr-existing")
+    XCTAssertEqual(result.alreadyAttributed, true)
+    XCTAssertEqual(result.codeMatches, false)
+    XCTAssertEqual(result.offer?.creatorName, "Bea")
+    XCTAssertEqual(TapAppLink.getOffer()?.creatorName, "Bea")
   }
 
   func testApplyCodeLegacy404UnknownCodeBody() async {
@@ -378,7 +408,7 @@ final class TapAppLinkTests: XCTestCase {
       XCTAssertEqual(error, expected)
       XCTAssertEqual(
         captured?.value(forHTTPHeaderField: "X-TapAppLink-SDK-Version"),
-        "0.3.2"
+        "0.3.3"
       )
       XCTAssertNotNil(TestHTTPHelpers.requestJSON(captured)?["requestId"] as? String)
     } catch {
