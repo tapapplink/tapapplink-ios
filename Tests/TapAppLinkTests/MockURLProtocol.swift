@@ -7,11 +7,15 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
     var statusCode: Int
     var jsonObject: [String: Any]
     var error: Error?
+    /// Invoked on the protocol thread before responding; may block (e.g. wait on a gate).
+    var beforeRespond: (() -> Void)?
     var captureRequest: ((URLRequest) -> Void)?
   }
 
   private static let lock = NSLock()
   private static var _stub: Stub?
+  private static var _requestCount = 0
+  private static var _capturedRequests: [URLRequest] = []
 
   static var stub: Stub? {
     get {
@@ -26,8 +30,24 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
     }
   }
 
+  static var requestCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return _requestCount
+  }
+
+  static var capturedRequests: [URLRequest] {
+    lock.lock()
+    defer { lock.unlock() }
+    return _capturedRequests
+  }
+
   static func reset() {
-    stub = nil
+    lock.lock()
+    _stub = nil
+    _requestCount = 0
+    _capturedRequests = []
+    lock.unlock()
   }
 
   override class func canInit(with request: URLRequest) -> Bool {
@@ -39,12 +59,15 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
   }
 
   override func startLoading() {
+    Self.record(request)
+
     guard let stub = Self.stub else {
       client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
       return
     }
 
     stub.captureRequest?(request)
+    stub.beforeRespond?()
 
     if let error = stub.error {
       client?.urlProtocol(self, didFailWithError: error)
@@ -75,4 +98,11 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
   }
 
   override func stopLoading() {}
+
+  private static func record(_ request: URLRequest) {
+    lock.lock()
+    _requestCount += 1
+    _capturedRequests.append(request)
+    lock.unlock()
+  }
 }

@@ -44,19 +44,79 @@ public struct TapAppLinkOffer: Sendable, Codable, Equatable {
   }
 }
 
+/// Success body from `/redeemCode`. New fields from the server are optional so
+/// older clients keep compiling.
+public struct TapAppLinkRedeemResult: Sendable, Equatable {
+  public var attributionId: String?
+  public var alreadyAttributed: Bool?
+  /// True when the submitted code matches the attributed creator offer.
+  public var codeMatches: Bool?
+  public var offer: Offer?
+
+  public struct Offer: Sendable, Equatable {
+    public var creatorName: String?
+    public var promoCode: String?
+    public var billingOfferId: String?
+
+    public init(
+      creatorName: String? = nil,
+      promoCode: String? = nil,
+      billingOfferId: String? = nil
+    ) {
+      self.creatorName = creatorName
+      self.promoCode = promoCode
+      self.billingOfferId = billingOfferId
+    }
+  }
+
+  public init(
+    attributionId: String? = nil,
+    alreadyAttributed: Bool? = nil,
+    codeMatches: Bool? = nil,
+    offer: Offer? = nil
+  ) {
+    self.attributionId = attributionId
+    self.alreadyAttributed = alreadyAttributed
+    self.codeMatches = codeMatches
+    self.offer = offer
+  }
+
+  static func from(dictionary: [String: Any]) -> TapAppLinkRedeemResult {
+    var offer: Offer?
+    if let raw = dictionary["offer"] as? [String: Any] {
+      offer = Offer(
+        creatorName: raw["creatorName"] as? String,
+        promoCode: raw["promoCode"] as? String,
+        billingOfferId: raw["billingOfferId"] as? String
+      )
+    }
+    return TapAppLinkRedeemResult(
+      attributionId: dictionary["attributionId"] as? String,
+      alreadyAttributed: dictionary["alreadyAttributed"] as? Bool,
+      codeMatches: dictionary["codeMatches"] as? Bool,
+      offer: offer
+    )
+  }
+}
+
 public enum TapAppLink {
   /// Semver shipped in the `X-TapAppLink-SDK-Version` request header.
-  public static let sdkVersion = "0.3.2"
+  public static let sdkVersion = "0.3.3"
 
   private static var config: TapAppLinkConfig?
   private static var tracked = false
   private static var installId: String?
   private static var lastAttributionId: String?
   private static var lastAppUserId: String?
+  /// Last app user id that successfully completed `/ingestIdentify` (persisted).
+  private static var identifiedAppUserId: String?
   private static var lastOffer: TapAppLinkOffer?
   private static var pendingRedeem: RedeemAttemptStore.Pending?
   private static var session = URLSession.shared
   private static let defaults = UserDefaults(suiteName: Storage.suiteName) ?? .standard
+  /// Coalesce concurrent identical `setAppUserId` calls into one POST.
+  private static var identifyInFlight: [String: Task<[String: Any], Error>] = [:]
+  private static let identifyLock = NSLock()
 
   public static func configure(_ next: TapAppLinkConfig) {
     config = next
@@ -103,15 +163,44 @@ public enum TapAppLink {
   public static func setAppUserId(_ appUserId: String) async throws -> [String: Any] {
     loadPersistedState()
     lastAppUserId = appUserId
-    var body: [String: Any] = ["appUserId": appUserId]
-    if let lastAttributionId {
-      body["attributionId"] = lastAttributionId
+
+    if identifiedAppUserId == appUserId {
+      let result = skippedIdentifyResult(appUserId: appUserId)
+      log("setAppUserId skipped (already identified)")
+      log("setAppUserId returning \(debugJSON(result))")
+      return result
     }
-    return try await post("/ingestIdentify", body: body)
+
+    identifyLock.lock()
+    if let existing = identifyInFlight[appUserId] {
+      identifyLock.unlock()
+      log("setAppUserId coalesced with in-flight identify for \(appUserId)")
+      return try await existing.value
+    }
+
+    let task = Task<[String: Any], Error> {
+      defer {
+        identifyLock.lock()
+        identifyInFlight.removeValue(forKey: appUserId)
+        identifyLock.unlock()
+      }
+      var body: [String: Any] = ["appUserId": appUserId]
+      if let lastAttributionId {
+        body["attributionId"] = lastAttributionId
+      }
+      let result = try await post("/ingestIdentify", body: body)
+      identifiedAppUserId = appUserId
+      persistIdentifiedAppUserId(appUserId)
+      logStoredState()
+      return result
+    }
+    identifyInFlight[appUserId] = task
+    identifyLock.unlock()
+    return try await task.value
   }
 
   @discardableResult
-  public static func applyCode(_ code: String) async throws -> [String: Any] {
+  public static func applyCode(_ code: String) async throws -> TapAppLinkRedeemResult {
     loadPersistedState()
     let normalized = RedeemAttemptStore.normalizeCode(code)
     let requestId = ensureRedeemRequestId(forNormalizedCode: normalized)
@@ -132,7 +221,7 @@ public enum TapAppLink {
       clearPendingRedeem()
       cacheFromResult(result)
       logStoredState()
-      return result
+      return TapAppLinkRedeemResult.from(dictionary: result)
     } catch let error as TapAppLinkRedeemError {
       switch error {
       case .unknownCode, .inactiveCode, .wrongEnvironment:
@@ -189,9 +278,13 @@ public enum TapAppLink {
     installId = nil
     lastAttributionId = nil
     lastAppUserId = nil
+    identifiedAppUserId = nil
     lastOffer = nil
     pendingRedeem = nil
     session = .shared
+    identifyLock.lock()
+    identifyInFlight.removeAll()
+    identifyLock.unlock()
     Storage.clear(defaults)
     log("resetForTesting cleared memory and UserDefaults suite \(Storage.suiteName)")
   }
@@ -217,15 +310,25 @@ public enum TapAppLink {
     installId: String,
     tracked: Bool,
     attributionId: String? = nil,
+    identifiedAppUserId: String? = nil,
     offer: TapAppLinkOffer? = nil
   ) {
     self.installId = installId
     self.tracked = tracked
     self.lastAttributionId = attributionId
+    self.identifiedAppUserId = identifiedAppUserId
+    if let identifiedAppUserId {
+      self.lastAppUserId = identifiedAppUserId
+    }
     self.lastOffer = offer
     defaults.set(installId, forKey: Storage.installId)
     defaults.set(tracked, forKey: Storage.tracked)
     defaults.set(attributionId, forKey: Storage.attributionId)
+    if let identifiedAppUserId {
+      persistIdentifiedAppUserId(identifiedAppUserId)
+    } else {
+      defaults.removeObject(forKey: Storage.appUserId)
+    }
     if let offer {
       persistOffer(offer)
     } else {
@@ -240,8 +343,23 @@ public enum TapAppLink {
     installId = nil
     lastAttributionId = nil
     lastAppUserId = nil
+    identifiedAppUserId = nil
     lastOffer = nil
     pendingRedeem = nil
+    identifyLock.lock()
+    identifyInFlight.removeAll()
+    identifyLock.unlock()
+  }
+
+  private static func skippedIdentifyResult(appUserId: String) -> [String: Any] {
+    var result: [String: Any] = [
+      "skipped": true,
+      "appUserId": appUserId,
+    ]
+    if let lastAttributionId {
+      result["attributionId"] = lastAttributionId
+    }
+    return result
   }
 
   private static func skippedInstallResult() -> [String: Any] {
@@ -293,6 +411,12 @@ public enum TapAppLink {
     if lastAttributionId == nil {
       lastAttributionId = defaults.string(forKey: Storage.attributionId)
     }
+    if identifiedAppUserId == nil {
+      identifiedAppUserId = defaults.string(forKey: Storage.appUserId)
+      if lastAppUserId == nil, let identifiedAppUserId {
+        lastAppUserId = identifiedAppUserId
+      }
+    }
     if lastOffer == nil, let data = defaults.data(forKey: Storage.offer) {
       lastOffer = try? JSONDecoder().decode(TapAppLinkOffer.self, from: data)
     }
@@ -324,6 +448,10 @@ public enum TapAppLink {
 
   private static func persistTracked(_ value: Bool) {
     defaults.set(value, forKey: Storage.tracked)
+  }
+
+  private static func persistIdentifiedAppUserId(_ value: String) {
+    defaults.set(value, forKey: Storage.appUserId)
   }
 
   private static func persistAttributionId(_ value: String) {
@@ -441,8 +569,9 @@ public enum TapAppLink {
     log(
       "storedState installId=\(installId ?? "nil") tracked=\(tracked) " +
         "attributionId=\(lastAttributionId ?? "nil") " +
-        "appUserId=\(lastAppUserId ?? "nil") offer=(\(offerSummary)) " +
-        "pendingRedeem=(\(pendingSummary))"
+        "appUserId=\(lastAppUserId ?? "nil") " +
+        "identifiedAppUserId=\(identifiedAppUserId ?? "nil") " +
+        "offer=(\(offerSummary)) pendingRedeem=(\(pendingSummary))"
     )
   }
 
@@ -471,12 +600,15 @@ public enum TapAppLink {
     static let installId = "tapapplink.installId"
     static let tracked = "tapapplink.tracked"
     static let attributionId = "tapapplink.attributionId"
+    /// Last app user id that successfully completed `/ingestIdentify`.
+    static let appUserId = "tapapplink.appUserId"
     static let offer = "tapapplink.offer"
 
     static func clear(_ defaults: UserDefaults) {
       defaults.removeObject(forKey: installId)
       defaults.removeObject(forKey: tracked)
       defaults.removeObject(forKey: attributionId)
+      defaults.removeObject(forKey: appUserId)
       defaults.removeObject(forKey: offer)
       RedeemAttemptStore.clear(defaults)
     }

@@ -15,10 +15,10 @@ https://github.com/tapapplink/tapapplink-ios
 Or in a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.2")
+.package(url: "https://github.com/tapapplink/tapapplink-ios", from: "0.3.3")
 ```
 
-Pin to a released semver tag such as `0.3.2`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
+Pin to a released semver tag such as `0.3.3`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how CI verifies tags and publishes GitHub Releases.
 
 ## Usage
 
@@ -40,11 +40,11 @@ if let offer = TapAppLink.getOffer() {
 let code = "SARAH10"
 do {
   let result = try await TapAppLink.applyCode(code)
-  let alreadyAttributed = result["alreadyAttributed"] as? Bool ?? false
-  let offer = result["offer"] as? [String: Any]
+  let alreadyAttributed = result.alreadyAttributed ?? false
+  let codeMatches = result.codeMatches
   let offerLine: String? = {
-    guard let name = offer?["creatorName"] as? String, !name.isEmpty else { return nil }
-    if let promo = offer?["promoCode"] as? String, !promo.isEmpty {
+    guard let name = result.offer?.creatorName, !name.isEmpty else { return nil }
+    if let promo = result.offer?.promoCode, !promo.isEmpty {
       return "\(name) · \(promo)"
     }
     return name
@@ -53,7 +53,8 @@ do {
   if alreadyAttributed {
     // Title: "You're all set"
     // Hide the code the customer typed.
-    // Show offerLine if present.
+    // Show offerLine if present. codeMatches is optional when already attributed.
+    _ = codeMatches
   } else {
     // Title: "Code applied"
     // Show the code, plus offerLine if present.
@@ -91,9 +92,9 @@ do {
 
 From 0.3.2, that automatic network retry is safe because the SDK reuses its request ID, so the server won't count the install twice.
 
-Show success UI only on a real success result from `applyCode`. Do not treat an error as applied.
+Show success UI only on a real success result from `applyCode`. Do not treat an error as applied. When already attributed, the server may return `alreadyAttributed`, optional `codeMatches`, and an `offer` with optional `creatorName`.
 
-`trackInstall()` is safe on every launch: the SDK persists an install id, the tracked flag, the attribution id and the offer in `UserDefaults`, and only posts `/ingestInstall` once per install. Later launches return the stored attribution and offer without a network call. Call `resetForTesting()` in debug builds before repeating a match test on the same install.
+`trackInstall()` is safe on every launch: the SDK persists an install id, the tracked flag, the attribution id and the offer in `UserDefaults`, and only posts `/ingestInstall` once per install. Later launches return the stored attribution and offer without a network call. `setAppUserId` likewise skips `/ingestIdentify` when the id matches the last successful identify (also persisted), and coalesces concurrent identical calls. Call `resetForTesting()` in debug builds before repeating a match test on the same install.
 
 Opt into request logging with `debugLogging: true` on `TapAppLinkConfig`. Logs include each request, response and stored state, and redact the API key.
 
